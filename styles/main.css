@@ -1,0 +1,55 @@
+/* Trend Lens — News Feed Styling */
+
+.stMarkdown h4 a {
+    color: inherit;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+.stMarkdown h4 a:hover {
+    color: #64748b;
+}
+
+.stMarkdown h4 {
+    font-weight: 600;
+    letter-spacing: -0.4px;
+    line-height: 1.4;
+}
+/* Reduce spacing around article headlines */
+
+.stMarkdown h4 {
+    margin-top: 0;
+    margin-bottom: 0.35rem;
+}
+
+/* Reduce spacing around article separators */
+
+.stDivider {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Trend Lens — Minimal Editorial Postcard Hover */
+
+div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"] {
+    transition:
+        transform 0.25s ease,
+        box-shadow 0.25s ease;
+}
+
+div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"]:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+/* Respect reduced-motion preferences */
+
+@media (prefers-reduced-motion: reduce) {
+    div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"] {
+        transition: none;
+    }
+
+    div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"]:hover {
+        transform: none;
+    }
+}
