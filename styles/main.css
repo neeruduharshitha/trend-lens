@@ -53,3 +53,15 @@ div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"]:hover {
         transform: none;
     }
 }
+
+/* Comfortable editorial reading width */
+.block-container {
+    max-width: 950px;
+    padding-top: 2rem;
+    padding-bottom: 4rem;
+}
+
+/* Improve article readability */
+.stMarkdown p {
+    line-height: 1.75;
+}
