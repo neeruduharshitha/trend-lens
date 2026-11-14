@@ -25,6 +25,27 @@ def make_article(title, url, published):
 
 
 class TestHistoryRetriever(unittest.TestCase):
+    def test_preserves_source_name(self):
+        current = {
+            "title": "OpenAI announces new AI agent platform",
+            "link": "https://example.com/current",
+            "published": "Fri, 13 Nov 2026 20:00:00 GMT",
+        }
+
+        candidates = [{
+            "title": "OpenAI introduces AI agent tools",
+            "link": "https://news.google.com/rss/articles/example",
+            "published": "Thu, 12 Nov 2026 15:00:00 GMT",
+            "source": "TechCrunch",
+        }]
+
+        results = find_related_history(
+            current,
+            candidates,
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["source"], "TechCrunch")
 
     def test_relevant_earlier_article(self):
         candidates = [

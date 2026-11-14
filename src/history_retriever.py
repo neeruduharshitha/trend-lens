@@ -208,12 +208,13 @@ def find_related_history(
         seen_urls.add(normalized_url)
 
         results.append({
-            "title": title.strip(),
-            "link": url,
-            "published": published,
-            "published_utc": candidate_date,
-            "relevance_score": round(score, 3),
-        })
+    "title": title.strip(),
+    "link": url,
+    "published": published,
+    "source": candidate.get("source", ""),
+    "published_utc": candidate_date,
+    "relevance_score": round(score, 3),
+})
 
     results.sort(
         key=lambda item: (
