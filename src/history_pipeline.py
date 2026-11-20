@@ -1,7 +1,9 @@
 
+import logging
 import re
 from datetime import timedelta
 
+from src.history_topics import topic_relevance
 from src.historical_queries import (
     generate_historical_queries,
     historical_topic_score,
@@ -20,8 +22,26 @@ from src.publisher_extractor import (
 from src.publisher_resolver import resolve_publisher_links
 
 
+logger = logging.getLogger(__name__)
+
+
 # ---------------------------------------------------------
-# 1. Historical query helpers
+# 1. Diagnostic logging
+# ---------------------------------------------------------
+
+def log_history_stage(stage, candidates):
+    """Log the number of candidates remaining at each stage."""
+    count = len(candidates) if isinstance(candidates, list) else 0
+
+    logger.info(
+        "Trend Lens history | stage=%s | count=%d",
+        stage,
+        count,
+    )
+
+
+# ---------------------------------------------------------
+# 2. Historical query helpers
 # ---------------------------------------------------------
 
 EVENT_WORDS = {
@@ -53,7 +73,6 @@ def build_historical_query(title, max_terms=5):
     Retained for compatibility with existing tests
     and other modules.
     """
-
     if not isinstance(title, str):
         return ""
 
@@ -98,7 +117,7 @@ def build_historical_query(title, max_terms=5):
 
 
 # ---------------------------------------------------------
-# 2. Historical date validation
+# 3. Historical date validation
 # ---------------------------------------------------------
 
 def sufficiently_historical(
@@ -110,7 +129,6 @@ def sufficiently_historical(
     Require a candidate article to have been published
     before the current article by at least min_age_days.
     """
-
     if not isinstance(current_article, dict):
         return False
 
@@ -141,7 +159,7 @@ def sufficiently_historical(
 
 
 # ---------------------------------------------------------
-# 3. Duplicate headline detection
+# 4. Duplicate headline detection
 # ---------------------------------------------------------
 
 def title_similarity(title_a, title_b):
@@ -150,7 +168,6 @@ def title_similarity(title_a, title_b):
 
     Used to identify likely duplicate news coverage.
     """
-
     tokens_a = tokenize_title(title_a)
     tokens_b = tokenize_title(title_b)
 
@@ -167,10 +184,9 @@ def diversify_history(candidates, limit=30):
     """
     Reduce near-duplicate headlines.
 
-    Preserve the input order, which should already
+    Preserve input order, which should already
     reflect historical topic relevance.
     """
-
     if not isinstance(candidates, list):
         return []
 
@@ -208,7 +224,7 @@ def diversify_history(candidates, limit=30):
 
 
 # ---------------------------------------------------------
-# 4. Publisher article extraction and verification
+# 5. Publisher article extraction and verification
 # ---------------------------------------------------------
 
 def prepare_history_candidates(
@@ -220,7 +236,6 @@ def prepare_history_candidates(
     Extract publisher article text and verify
     preliminary historical evidence.
     """
-
     if not isinstance(candidates, list):
         return []
 
@@ -228,6 +243,9 @@ def prepare_history_candidates(
         return []
 
     enriched = []
+
+    skipped_invalid_url = 0
+    failed_extraction = 0
 
     for candidate in candidates:
         if not isinstance(candidate, dict):
@@ -239,13 +257,25 @@ def prepare_history_candidates(
         )
 
         if not publisher_host(publisher_url):
+            skipped_invalid_url += 1
             continue
 
-        article_text = extract_publisher_article(
-            publisher_url
-        )
+        try:
+            article_text = extract_publisher_article(
+                publisher_url
+            )
+        except Exception:
+            failed_extraction += 1
+
+            logger.warning(
+                "Historical publisher extraction failed: %s",
+                publisher_url,
+                exc_info=True,
+            )
+            continue
 
         if not article_text:
+            failed_extraction += 1
             continue
 
         enriched.append({
@@ -253,15 +283,34 @@ def prepare_history_candidates(
             "article_text": article_text,
         })
 
-    return verify_history_candidates(
+    log_history_stage(
+        "publisher_text_extracted",
+        enriched,
+    )
+
+    logger.info(
+        "Trend Lens history | invalid_urls=%d | "
+        "failed_extractions=%d",
+        skipped_invalid_url,
+        failed_extraction,
+    )
+
+    verified = verify_history_candidates(
         current_article,
         enriched,
         limit=limit,
     )
 
+    log_history_stage(
+        "verified_evidence",
+        verified,
+    )
+
+    return verified
+
 
 # ---------------------------------------------------------
-# 5. Complete historical evidence pipeline
+# 6. Complete historical evidence pipeline
 # ---------------------------------------------------------
 
 def build_historical_evidence(
@@ -297,6 +346,9 @@ def build_historical_evidence(
     # -----------------------------------------------------
 
     if not isinstance(current_article, dict):
+        logger.warning(
+            "Historical pipeline received invalid article."
+        )
         return []
 
     if (
@@ -305,11 +357,17 @@ def build_historical_evidence(
         or max_resolve_results <= 0
         or min_age_days < 0
     ):
+        logger.warning(
+            "Historical pipeline received invalid limits."
+        )
         return []
 
     title = current_article.get("title", "")
 
     if not isinstance(title, str) or not title.strip():
+        logger.warning(
+            "Historical pipeline received empty title."
+        )
         return []
 
     current_date = parse_article_date(
@@ -317,7 +375,16 @@ def build_historical_evidence(
     )
 
     if current_date is None:
+        logger.warning(
+            "Historical pipeline could not parse date: %s",
+            title,
+        )
         return []
+
+    logger.info(
+        "Trend Lens history | starting article=%s",
+        title,
+    )
 
     # -----------------------------------------------------
     # Generate historical search queries
@@ -332,6 +399,9 @@ def build_historical_evidence(
     seen_queries = {title.strip().lower()}
 
     for query in generated_queries:
+        if not isinstance(query, str):
+            continue
+
         normalized = query.strip().lower()
 
         if not normalized:
@@ -342,6 +412,11 @@ def build_historical_evidence(
 
         seen_queries.add(normalized)
         queries.append(query)
+
+    logger.info(
+        "Trend Lens history | search_queries=%s",
+        queries,
+    )
 
     # -----------------------------------------------------
     # Search Google News
@@ -356,11 +431,28 @@ def build_historical_evidence(
                 query,
                 max_results=max_search_results,
             )
+
         except RuntimeError:
+            logger.warning(
+                "Historical news search failed: %s",
+                query,
+                exc_info=True,
+            )
             continue
 
         if not isinstance(found, list):
+            logger.warning(
+                "Historical search returned invalid data "
+                "for query: %s",
+                query,
+            )
             continue
+
+        logger.info(
+            "Trend Lens history | query=%s | results=%d",
+            query,
+            len(found),
+        )
 
         for candidate in found:
             if not isinstance(candidate, dict):
@@ -377,7 +469,15 @@ def build_historical_evidence(
             seen_links.add(link)
             all_candidates.append(candidate)
 
+    log_history_stage(
+        "search",
+        all_candidates,
+    )
+
     if not all_candidates:
+        logger.info(
+            "Historical pipeline stopped: no search results."
+        )
         return []
 
     # -----------------------------------------------------
@@ -394,16 +494,25 @@ def build_historical_evidence(
         )
     ]
 
+    log_history_stage(
+        "historical_dates",
+        historical,
+    )
+
     if not historical:
+        logger.info(
+            "Historical pipeline stopped: "
+            "no sufficiently old articles."
+        )
         return []
 
     # -----------------------------------------------------
     # Validate URLs and rank historical candidates
     # -----------------------------------------------------
 
-    # The original title overlap threshold is set to
-    # zero here because broader topic relevance is
-    # evaluated in the next step.
+    # Title overlap threshold is zero here because
+    # broader topic relevance is evaluated next.
+
     related = find_related_history(
         current_article,
         historical,
@@ -411,16 +520,29 @@ def build_historical_evidence(
         min_score=0.0,
     )
 
+    log_history_stage(
+        "valid_related_urls",
+        related,
+    )
+
     if not related:
+        logger.info(
+            "Historical pipeline stopped: "
+            "no valid related article URLs."
+        )
         return []
 
     # Calculate historical topic relevance.
     for candidate in related:
-        candidate["historical_topic_score"] = (
+        candidate["historical_topic_score"] = max(
             historical_topic_score(
                 title,
                 candidate["title"],
-            )
+            ),
+            topic_relevance(
+                title,
+                candidate["title"],
+            ),
         )
 
     # Remove candidates with little topic connection.
@@ -430,7 +552,16 @@ def build_historical_evidence(
         if candidate["historical_topic_score"] >= 0.15
     ]
 
+    log_history_stage(
+        "topic_relevance",
+        related,
+    )
+
     if not related:
+        logger.info(
+            "Historical pipeline stopped: "
+            "no sufficiently relevant articles."
+        )
         return []
 
     # Rank stronger topic matches first.
@@ -451,7 +582,16 @@ def build_historical_evidence(
         limit=max_resolve_results,
     )
 
+    log_history_stage(
+        "diversified",
+        diverse,
+    )
+
     if not diverse:
+        logger.info(
+            "Historical pipeline stopped: "
+            "no diverse historical articles."
+        )
         return []
 
     # -----------------------------------------------------
@@ -463,7 +603,16 @@ def build_historical_evidence(
         max_results=max_resolve_results,
     )
 
+    log_history_stage(
+        "publisher_resolution",
+        resolved,
+    )
+
     if not resolved:
+        logger.info(
+            "Historical pipeline stopped: "
+            "publisher links could not be resolved."
+        )
         return []
 
     # -----------------------------------------------------
@@ -474,6 +623,12 @@ def build_historical_evidence(
         current_article,
         resolved,
         limit=limit,
+    )
+
+    logger.info(
+        "Trend Lens history | completed | "
+        "verified_candidates=%d",
+        len(verified),
     )
 
     return verified

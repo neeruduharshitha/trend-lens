@@ -7,6 +7,11 @@ from src.history_retriever import (
     tokenize_title,
 )
 
+from src.history_topics import (
+    extract_topics,
+    topic_relevance,
+)
+
 
 def is_publisher_url(url):
     """Require an HTTP(S) article URL outside Google News."""
@@ -154,10 +159,17 @@ def verify_history_candidate(
     if not isinstance(source, str) or not source.strip():
         return None
 
-    score = relevance_score(
+    lexical_score = relevance_score(
+    current_title,
+    candidate_title,
+)
+
+    semantic_score = topic_relevance(
         current_title,
         candidate_title,
     )
+
+    score = max(lexical_score, semantic_score)
 
     if score < min_score:
         return None
@@ -167,7 +179,12 @@ def verify_history_candidate(
 
     shared_terms = current_tokens & candidate_tokens
 
-    if len(shared_terms) < 2:
+    shared_topics = (
+    extract_topics(current_title)
+    & extract_topics(candidate_title)
+)
+
+    if len(shared_terms) < 2 and len(shared_topics) < 2:
         return None
 
     article_text = clean_article_text(
@@ -177,9 +194,14 @@ def verify_history_candidate(
     if len(article_text) < min_text_chars:
         return None
 
+    evidence_terms = set(shared_terms)
+
+    if len(shared_terms) < 2:
+        evidence_terms |= tokenize_title(candidate_title)
+
     evidence = get_evidence_excerpt(
         article_text,
-        shared_terms,
+        evidence_terms,
     )
 
     if not evidence:
