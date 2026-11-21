@@ -1,12 +1,14 @@
 
 from pathlib import Path
 from email.utils import parsedate_to_datetime
+from datetime import datetime, timedelta, timezone
+import logging
 
 import streamlit as st
-import logging
 
 from src.collector import fetch_news
 from src.article_detail import show_article_detail
+from src.news_storage import save_articles, get_articles_for_day
 
 
 # =========================================================
@@ -19,11 +21,12 @@ st.set_page_config(
     layout="wide",
 )
 
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(levelname)s | %(name)s | %(message)s",
 )
+
+logger = logging.getLogger(__name__)
 
 
 # =========================================================
@@ -52,20 +55,17 @@ else:
 
 def truncate_summary(summary, max_length=180):
     """Shorten summaries without cutting words in half."""
-
     summary = str(summary or "")
 
     if len(summary) <= max_length:
         return summary
 
     shortened = summary[:max_length].rsplit(" ", 1)[0]
-
     return shortened.rstrip(".,;:") + "..."
 
 
 def format_date(published):
     """Convert RSS publication dates to a readable format."""
-
     if not published:
         return ""
 
@@ -79,23 +79,17 @@ def format_date(published):
 
 def display_article_card(article, index):
     """Display an article in the Trend Lens news grid."""
-
     with st.container(border=True, height="stretch"):
 
-        # Article headline
         st.markdown(
             f"#### [{article['title']}]({article['link']})"
         )
 
-        # Short article summary
         summary = article.get("summary", "")
 
         if summary:
-            st.write(
-                truncate_summary(summary)
-            )
+            st.write(truncate_summary(summary))
 
-        # Publication date
         published = format_date(
             article.get("published", "")
         )
@@ -103,7 +97,6 @@ def display_article_card(article, index):
         if published:
             st.caption(published)
 
-        # Open the internal article detail page
         if st.button(
             "Understand this news →",
             key=f"article_{index}",
@@ -160,22 +153,86 @@ st.info(
 
 
 # =========================================================
-# 7. LIVE NEWS FEED
+# 7. FETCH AND SAVE NEWS
 # =========================================================
-
-st.header("Latest AI & Technology News")
 
 feed_url = "https://techcrunch.com/feed/"
 
-articles = fetch_news(feed_url)
+try:
+    live_articles = fetch_news(feed_url)
 
-st.write(
-    f"Found {len(articles)} articles."
+    # Save articles each time the feed is successfully fetched.
+    # Duplicate URLs update existing rows rather than adding copies.
+    save_articles(live_articles)
+
+except Exception:
+    logger.exception("News collection or storage failed")
+    live_articles = []
+    st.warning(
+        "The latest news could not be refreshed. "
+        "You can still browse previously saved articles."
+    )
+
+
+# =========================================================
+# 8. SEVEN-DAY NEWS ARCHIVE
+# =========================================================
+
+st.header("Explore the Past Seven Days")
+
+today = datetime.now(timezone.utc).date()
+
+available_days = [
+    today - timedelta(days=offset)
+    for offset in range(7)
+]
+
+day_labels = {
+    day.strftime("%a, %b %d"): day
+    for day in available_days
+}
+
+selected_label = st.selectbox(
+    "Select a publication date",
+    options=list(day_labels.keys()),
+    index=0,
+)
+
+selected_day = day_labels[selected_label]
+
+st.caption(
+    "Articles are grouped by publication date in UTC. "
+    "The archive includes articles collected by Trend Lens."
 )
 
 
 # =========================================================
-# 8. TWO-COLUMN NEWS GRID
+# 9. LOAD SAVED ARTICLES
+# =========================================================
+
+try:
+    articles = get_articles_for_day(selected_day)
+except Exception:
+    logger.exception("Unable to read saved articles")
+    articles = []
+    st.error("The news archive could not be loaded.")
+
+st.header(
+    f"News from {selected_day.strftime('%B %d, %Y')}"
+)
+
+st.write(f"Found {len(articles)} saved articles.")
+
+if not articles:
+    st.info(
+        "No articles have been collected for this date yet. "
+        "Older dates will populate as Trend Lens saves news "
+        "from its RSS sources."
+    )
+
+
+# =========================================================
+# 10. TWO-COLUMN NEWS GRID
 # =========================================================
 
 for index in range(0, len(articles), 2):
