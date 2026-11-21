@@ -3,3 +3,4 @@ feedparser
 requests
 pandas
 python-dotenv
+gnews-decoder==0.1.1
