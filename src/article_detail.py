@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 import streamlit as st
 
 from src.article_extractor import extract_article
-from src.ai_explainer import explain_article
+from src.gemini_provider import explain_with_gemini
 from src.history_ui import render_historical_context
 
 
@@ -16,10 +16,12 @@ def get_article_content(url):
     return extract_article(url)
 
 
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_ai_explanation(title, article_text):
-    """Generate and cache a local AI briefing."""
-    return explain_article(title, article_text)
+    """Generate and cache a Gemini AI briefing."""
+    return explain_with_gemini(title, article_text)
+
 
 
 def escape(value):
