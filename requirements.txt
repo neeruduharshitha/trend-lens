@@ -3,4 +3,5 @@ feedparser
 requests
 pandas
 python-dotenv
+supabase
 gnews-decoder==0.1.1
