@@ -6,9 +6,11 @@ import logging
 
 import streamlit as st
 
-from src.collector import fetch_news
+import os
+
 from src.article_detail import show_article_detail
-from src.news_storage import save_articles, get_articles_for_day
+from src.news_storage import get_articles_for_day
+from src.supabase_storage import get_articles_for_day_supabase
 
 
 # =========================================================
@@ -153,27 +155,21 @@ st.info(
 
 
 # =========================================================
-# 7. FETCH AND SAVE NEWS
+# 7. STORAGE CONFIGURATION
 # =========================================================
 
-feed_url = "https://techcrunch.com/feed/"
+# Supabase is the primary database.
+# SQLite remains available for local development.
 
-try:
-    live_articles = fetch_news(feed_url)
+USE_SUPABASE = bool(
+    os.getenv("SUPABASE_URL")
+    and os.getenv("SUPABASE_SECRET_KEY")
+)
 
-    # Save articles each time the feed is successfully fetched.
-    # Duplicate URLs update existing rows rather than adding copies.
-    save_articles(live_articles)
-
-except Exception:
-    logger.exception("News collection or storage failed")
-    live_articles = []
-    st.warning(
-        "The latest news could not be refreshed. "
-        "You can still browse previously saved articles."
-    )
-
-
+if USE_SUPABASE:
+    logger.info("Trend Lens is using Supabase storage.")
+else:
+    logger.info("Trend Lens is using local SQLite storage.")
 # =========================================================
 # 8. SEVEN-DAY NEWS ARCHIVE
 # =========================================================
